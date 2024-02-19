@@ -1,3 +1,5 @@
 Description,Host,Ip,Ports,ICMP,Result,Exceptions,
-Test_1,google.com,8.8.8.8,443,,,
-Test_1,cloudflare.com,1.1.1.1,443,,,
+Test,google.com,8.8.8.8,443,,,
+Test,google.com,8.8.8.8,53,,,
+Test,cloudflare.com,1.1.1.1,444,,,
+Test,cloudflare.com,1.1.1.1,445,,,
