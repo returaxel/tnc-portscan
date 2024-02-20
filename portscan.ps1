@@ -1,71 +1,97 @@
-$CSVSrc = Import-CSV ".\portscan_server.csv"
+<#
+    .NOTES 
+        now with less async and more wait
+#>
 
-# Path
-$SavePath = "C:\Temp\PortScan"
+param (
+    [Parameter()][switch]$EnableFancyOutput
+)
+
+$CSVSrc = Import-CSV ".\portscan_server.csv" 
+
+$ProgressPreference = 'SilentlyContinue'
+#$ErrorActionPreference = 'Ignore'
 
 # Current Host
 $TargetHost = $null
 $TargetAddr = $null
 
-# Scriptblock
-$SB_ICMP = { 
-    param($TargetHost,$TargetAddr,$SavePath) 
-    $ProgressPreference = 'SilentlyContinue'
+# TimeToWait (MS)
+$WaitPort = 2500
+$WaitICMP = 3750
 
-    if (tnc -ComputerName $TargetAddr -TraceRoute -InformationLevel Quiet) {
-        #tnc -ComputerName $TargetAddr -TraceRoute -InformationLevel Detailed | 
-        Out-File "$SavePath\$($TargetHost),ICMP,TRUE.txt" -Force
-        Write-Output "$(Get-Date -Format HH:mm:ss.fff), ICMP,`t TRUE, $TargetHost, $TargetAddr"
+# Return this object
+[hashtable]$HostTable = @{}
+
+function tnc-icmpstatus {
+    param (
+        $TargetHost,$TargetAddr
+    )
+
+    # ping HostName 
+    $resultICMP = '{0} DNS' -f ([System.Net.NetworkInformation.Ping]::new().SendPingAsync($TargetHost)).AsyncWaitHandle.WaitOne($WaitICMP)
+
+    if ($resultICMP.Split(' ')[0] -eq 'false') {
+        # ping IP
+        $resultICMP = '{0} IP' -f (([System.Net.NetworkInformation.Ping]::new().SendPingAsync($TargetAddr)).AsyncWaitHandle.WaitOne($WaitICMP))
     }
-    else {
-        Out-File "$SavePath\$($TargetHost),ICMP,FALSE.log"
-        Write-Output "$(Get-Date -Format HH:mm:ss.fff),ICMP,`t FALSE, $TargetHost, $TargetAddr"
-        }
-    }
 
-$SB_PORT = { 
-    param($TargetHost,$TargetAddr,$SavePath,$port) 
-    $ProgressPreference = 'SilentlyContinue'
-
-    if (tnc -ComputerName $TargetAddr -TraceRoute -InformationLevel Quiet) {
-
-        #  Initialize object
-        $PortWhack = New-Object -TypeName Net.Sockets.TcpClient
-        if (($PortWhack.BeginConnect($TargetAddr,[int]$port,$Null,$Null)).AsyncWaitHandle.WaitOne(2500)) {
-            Out-File "$SavePath\$($TargetHost),$($port),TRUE.txt" -Force
-            Write-Output "$(Get-Date -Format HH:mm:ss.fff), $($port),`t TRUE, $TargetHost, $TargetAddr"
-        }
-        else {
-            Out-File "$SavePath\$($TargetHost),$($port),FALSE.log" -Force
-            Write-Output "$(Get-Date -Format HH:mm:ss.fff), $($port),`t FALSE, $TargetHost, $TargetAddr"
-        }
-    }
-    $PortWhack.Close()
+    Write-Host "$(Get-Date -Format HH:mm:ss.fff),`tICMP,$resultICMP`t $TargetHost, $TargetAddr"
+    return $resultICMP
 }
 
-# Iterate 
+# Iterate
 foreach ($row in $CSVSrc) {
-    Write-Host "[info] Target: " -NoNewline -ForegroundColor Cyan
+
     $TargetHost = $row.Host
     $TargetAddr = $row.IP
-    Write-Host $row -ForegroundColor DarkGray
 
-    Start-Job -Name "Trace_$($row.Description)" -ScriptBlock $SB_ICMP -ArgumentList @($TargetAddr, $TargetHost ,$SavePath) | Out-Null
+    #Write-Host "[info] " -NoNewline
+    #Write-Host "$TargetHost, $TargetAddr" -ForegroundColor DarkGray
 
-    $ports = $row.Ports -split " "
-    foreach ($port in $ports) {
-        Start-Job -Name "Prt_$($row.Description)" -ScriptBlock $SB_PORT -ArgumentList @($TargetAddr, $TargetHost,$SavePath, [int]$port) | Out-Null
+    $NewHost = [hashtable]@{
+        RawViewer = [System.Collections.Generic.List[string]]@()
+        Description = $row.Description
+        Host = $row.Host
+        IP = $row.Ip
+        ICMP = (tnc-icmpstatus $TargetAddr $TargetHost)
+        Ports = @{}
     }
+        
+    if (($NewHost['ICMP'] -split ' ')[0] -and (-not[string]::IsNullOrEmpty($row.Ports))) {
+        $ports = $row.Ports -split " "
+        
+        foreach ($port in $ports) {
+            # Open TcpClient
+            $PortWhack = New-Object -TypeName Net.Sockets.TcpClient
+            # tnc -ComputerName $TargetAddr -Port $port -InformationLevel Quiet
+            $NewHost['Ports'][$port] = if ( ($PortWhack.BeginConnect($TargetAddr,[int]$port,$Null,$Null)).AsyncWaitHandle.WaitOne($WaitPort) ) {
+                $true
+            }
+            else {
+                $false
+            }
+            $NewHost['RawViewer'].Add("$port, $($NewHost['Ports'][$port]), $TargetHost, $TargetAddr")
+            $PortWhack.Close()
+        }
+    }
+
+    $HostTable[$row.Host] = $NewHost
+    
+    # Avoid mistakes
+    Clear-Variable TargetHost, TargetAddr
+
 }
 
-# Wait for jobs to finish
-# Move inside loop to get grouped results for each host
-$StillRunning = $true
-while ($StillRunning) {
-    Start-Sleep 5
-    if ((Get-Job).State -notcontains "Running") {
-        Receive-Job *
-        $StillRunning = $false
-        Remove-Job * 
+# Fluff
+if ($EnableFancyOutput) {
+    foreach ($h in $HostTable.Keys) {
+        Write-Host "`n$($HostTable[$h].Host)" -NoNewline -ForegroundColor DarkGreen
+        Write-Host "  $($HostTable[$h].IP)" -ForegroundColor DarkGray
+        Write-Host `tICMP: $HostTable[$h].ICMP
+        Write-Host "PORT ----------------------- RESULT" -ForegroundColor DarkGray
+        $HostTable[$h].Ports | Out-Host
     }
-}
+} 
+
+$HostTable.values.RawViewer | convertfrom-csv -Header Port, Result, Host, IP |  Out-GridView -OutputMode Multiple
