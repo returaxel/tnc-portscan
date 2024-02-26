@@ -36,8 +36,8 @@ function tnc-icmpstatus {
         $resultICMP = '{0} IP' -f (([System.Net.NetworkInformation.Ping]::new().SendPingAsync($TargetAddr)).AsyncWaitHandle.WaitOne($WaitICMP))
     }
 
-    Write-Host "$(Get-Date -Format HH:mm:ss.fff),`tICMP,$resultICMP`t $TargetHost, $TargetAddr"
-    return $resultICMP
+    # Write-Host "$(Get-Date -Format HH:mm:ss.fff),`tICMP,$resultICMP`t $TargetHost, $TargetAddr"
+    return @($resultICMP, "$(Get-Date -Format HH:mm:ss.fff),`tICMP,$resultICMP`t $TargetHost, $TargetAddr")
 }
 
 # Iterate
@@ -58,7 +58,7 @@ foreach ($row in $CSVSrc) {
         Ports = @{}
     }
         
-    if (($NewHost['ICMP'] -split ' ')[0] -and (-not[string]::IsNullOrEmpty($row.Ports))) {
+    if (($NewHost['ICMP'][0] -split ' ')[0] -and (-not[string]::IsNullOrEmpty($row.Ports))) {
         $ports = $row.Ports -split " "
         
         foreach ($port in $ports) {
