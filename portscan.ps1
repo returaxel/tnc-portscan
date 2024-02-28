@@ -17,8 +17,8 @@ $TargetHost = $null
 $TargetAddr = $null
 
 # TimeToWait (MS)
-$WaitPort = 2500
-$WaitICMP = 3750
+$WaitPort = 12500
+$WaitICMP = 13750
 
 # Return this object
 [hashtable]$HostTable = @{}
@@ -37,7 +37,7 @@ function tnc-icmpstatus {
     }
 
     # Write-Host "$(Get-Date -Format HH:mm:ss.fff),`tICMP,$resultICMP`t $TargetHost, $TargetAddr"
-    return @($resultICMP, "$(Get-Date -Format HH:mm:ss.fff),`tICMP,$resultICMP`t $TargetHost, $TargetAddr")
+    return @("ICMP,$resultICMP,$resultICMP`t $TargetHost, $TargetAddr")
 }
 
 # Iterate
@@ -49,23 +49,28 @@ foreach ($row in $CSVSrc) {
     #Write-Host "[info] " -NoNewline
     #Write-Host "$TargetHost, $TargetAddr" -ForegroundColor DarkGray
 
+    $ResultICMP = (tnc-icmpstatus $TargetAddr $TargetHost)
+
     $NewHost = [hashtable]@{
         RawViewer = [System.Collections.Generic.List[string]]@()
         Description = $row.Description
         Host = $row.Host
         IP = $row.Ip
-        ICMP = (tnc-icmpstatus $TargetAddr $TargetHost)
+        ICMP = $ResultICMP
         Ports = @{}
     }
+
+    $NewHost['RawViewer'].Add($ResultICMP -Join ',')
         
-    if (($NewHost['ICMP'][0] -split ' ')[0] -and (-not[string]::IsNullOrEmpty($row.Ports))) {
+    if (($NewHost['ICMP'][1] -split ' ')[0] -and (-not[string]::IsNullOrEmpty($row.Ports))) {
         $ports = $row.Ports -split " "
         
         foreach ($port in $ports) {
-            # Open TcpClient
+            # TcpClient
             $PortWhack = New-Object -TypeName Net.Sockets.TcpClient
+            $ResultPort = ($PortWhack.BeginConnect($TargetAddr,[int]$port,$Null,$Null)).AsyncWaitHandle.WaitOne($WaitPort) 
             # tnc -ComputerName $TargetAddr -Port $port -InformationLevel Quiet
-            $NewHost['Ports'][$port] = if ( ($PortWhack.BeginConnect($TargetAddr,[int]$port,$Null,$Null)).AsyncWaitHandle.WaitOne($WaitPort) ) {
+            $NewHost['Ports'][$port] = if ($ResultPort -and -not[string]::IsNullOrEmpty($ResultPort)) {
                 $true
             }
             else {
