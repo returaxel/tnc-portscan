@@ -59,8 +59,8 @@ function tnc-icmpstatus {
 
     # ping HostName 
     $returnICMP = switch ((([System.Net.NetworkInformation.Ping]::new().Send($TargetAddr).Status))) {
-        DestinationHostUnreachable { $false }
-        Default { $true }
+        Success { $true }
+        Default { $false }
     }
 
     # Write-Host "$(Get-Date -Format HH:mm:ss.fff),`tICMP,$returnICMP`t $TargetHost, $TargetAddr"
@@ -77,7 +77,7 @@ foreach ($row in $CSVSrc) {
     $TargetAddr = $row.IP
 
 
-    Write-Host "`t$TargetAddr`t`t$TargetHost" -ForegroundColor DarkGray
+    Write-Host "`t$TargetAddr`t`t$TargetHost" -ForegroundColor DarkGray -NoNewline
 
     $ResultICMP = (tnc-icmpstatus $TargetHost $TargetAddr)
 
@@ -93,6 +93,8 @@ foreach ($row in $CSVSrc) {
     $NewHost['RawViewer'].Add($ResultICMP -Join ',')
         
     if ($ResultICMP[1] -and (-not[string]::IsNullOrEmpty($row.Ports))) {
+        Write-Host "`tICMP: Success" -ForegroundColor Yellow
+
         $ports = $row.Ports -split ' '
         
         foreach ($port in $ports) {
@@ -112,7 +114,7 @@ foreach ($row in $CSVSrc) {
         }
     }
     else {
-        Write-Host "`tSkipped" -ForegroundColor Yellow
+        Write-Host "`tICMP: DestinationHostUnreachable" -ForegroundColor Yellow
     }
 
     $HostTable[$row.Host] = $NewHost
